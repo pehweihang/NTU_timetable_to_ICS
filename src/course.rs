@@ -1,3 +1,4 @@
+use chrono::{Month, NaiveDate, NaiveTime, Weekday};
 use core::fmt;
 use std::error::Error;
 
@@ -20,7 +21,7 @@ pub struct Course {
 
 #[derive(Debug)]
 pub struct Class {
-    pub weekday: chrono::Weekday,
+    pub weekday: Weekday,
     pub period: Period,
     pub venue: String,
     pub group: String,
@@ -30,22 +31,14 @@ pub struct Class {
 
 #[derive(Debug)]
 pub struct Exam {
-    pub day: u32,
-    pub month: chrono::Month,
-    pub year: u32,
+    pub date: NaiveDate,
     pub peroid: Period,
 }
 
 #[derive(Debug)]
 pub struct Period {
-    start: Time,
-    end: Time,
-}
-
-#[derive(Debug)]
-pub struct Time {
-    hour: u32,
-    minute: u32,
+    pub start: NaiveTime,
+    pub end: NaiveTime,
 }
 
 #[derive(Debug)]
@@ -93,10 +86,10 @@ impl Course {
             }
 
             // Has exam info
-            if !row[14].is_empty() {
+            if !row[15].is_empty() && row[15] != "Not Applicable" {
                 if let Some(current_course) = courses.last_mut() {
                     current_course.exam =
-                        Some(parse_exam(row[14]).change_context(ParseTableError::Other)?);
+                        Some(parse_exam(row[15]).change_context(ParseTableError::Other)?);
                 }
             }
 
@@ -104,7 +97,7 @@ impl Course {
             if row[9].is_empty() {
                 continue;
             }
-            let weekday = match row[11].parse::<chrono::Weekday>() {
+            let weekday = match row[11].parse::<Weekday>() {
                 Ok(wd) => wd,
                 Err(_) => {
                     return Err(Report::new(ParseTableError::Other)
@@ -146,50 +139,74 @@ impl fmt::Display for ParseExamError {
 impl Error for ParseExamError {}
 
 fn parse_exam(exam_raw: &str) -> Result<Exam, ParseExamError> {
-    let re = regex::Regex::new(r"/(?<day>\d{2})-(?<month>[A-Z][a-z]{2})-(?<year>[0-9]{4}) (?<start_hour>\d{2})(?<start_minute>\d{2})to(?<end_hour>\d{2})(?<end_minute>\d{2})/gm").unwrap();
+    let re = regex::Regex::new(r"(?<day>\d{2})-(?<month>[A-Z][a-z]{2})-(?<year>[0-9]{4}) (?<start_hour>\d{2})(?<start_minute>\d{2})to(?<end_hour>\d{2})(?<end_minute>\d{2})").unwrap();
     let captures = re
         .captures(exam_raw)
         .ok_or(ParseExamError)
         .into_report()
-        .attach_printable_lazy(|| "Failed to parse exam date")?;
+        .attach_printable_lazy(|| format!("Failed to parse date: {}", exam_raw))?;
 
+    let day = captures.name("day").unwrap().as_str();
+    let day = day
+        .parse()
+        .into_report()
+        .change_context(ParseExamError)
+        .attach_printable(format!("Failed to parse day: {}", day))?;
     let month = captures.name("month").unwrap().as_str();
-    let month = match month.parse() {
+    let month = match month.parse::<Month>() {
         Ok(m) => m,
         Err(_) => {
             return Err(Report::new(ParseExamError)
                 .attach_printable(format!("Failed to parse month: {}", month)))
         }
     };
+    let year = captures.name("year").unwrap().as_str();
+    let year = year
+        .parse()
+        .into_report()
+        .change_context(ParseExamError)
+        .attach_printable(format!("Failed to parse year: {}", year))?;
+    let date = NaiveDate::from_ymd_opt(year, month.number_from_month(), day).ok_or(
+        Report::new(ParseExamError).attach_printable(format!(
+            "Failed to parse date from year: {}, month: {}, day: {}",
+            year,
+            month.number_from_month(),
+            day
+        )),
+    )?;
+    let start_hour = captures
+        .name("start_hour")
+        .unwrap()
+        .as_str()
+        .parse()
+        .unwrap();
+    let start_minute = captures
+        .name("start_minute")
+        .unwrap()
+        .as_str()
+        .parse()
+        .unwrap();
+    let end_hour = captures.name("end_hour").unwrap().as_str().parse().unwrap();
+    let end_minute = captures
+        .name("end_minute")
+        .unwrap()
+        .as_str()
+        .parse()
+        .unwrap();
+
+    let start = NaiveTime::from_hms_opt(start_hour, start_minute, 0).ok_or(
+        Report::new(ParseExamError).attach_printable(format!(
+            "Failed to parse time {}{}",
+            start_hour, start_minute,
+        )),
+    )?;
+    let end = NaiveTime::from_hms_opt(end_hour, end_minute, 0).ok_or(
+        Report::new(ParseExamError)
+            .attach_printable(format!("Failed to parse time {}{}", end_hour, end_minute,)),
+    )?;
     Ok(Exam {
-        day: captures.name("day").unwrap().as_str().parse().unwrap(),
-        month,
-        year: captures.name("year").unwrap().as_str().parse().unwrap(),
-        peroid: Period {
-            start: Time {
-                hour: captures
-                    .name("start_hour")
-                    .unwrap()
-                    .as_str()
-                    .parse()
-                    .unwrap(),
-                minute: captures
-                    .name("start_minute")
-                    .unwrap()
-                    .as_str()
-                    .parse()
-                    .unwrap(),
-            },
-            end: Time {
-                hour: captures.name("end_hour").unwrap().as_str().parse().unwrap(),
-                minute: captures
-                    .name("end_minute")
-                    .unwrap()
-                    .as_str()
-                    .parse()
-                    .unwrap(),
-            },
-        },
+        date,
+        peroid: Period { start, end },
     })
 }
 
@@ -257,16 +274,22 @@ fn parse_period(period: &str) -> Result<Period, ParsePeriodError> {
         .ok_or(ParsePeriodError)
         .into_report()
         .attach_printable_lazy(|| format!("Unable to parse period from {}", period))?;
-    Ok(Period {
-        start: Time {
-            hour: captures.get(1).unwrap().as_str().parse().unwrap(),
-            minute: captures.get(2).unwrap().as_str().parse().unwrap(),
-        },
-        end: Time {
-            hour: captures.get(3).unwrap().as_str().parse().unwrap(),
-            minute: captures.get(4).unwrap().as_str().parse().unwrap(),
-        },
-    })
+    let start_hour = captures.get(1).unwrap().as_str().parse().unwrap();
+    let start_minute = captures.get(2).unwrap().as_str().parse().unwrap();
+    let end_hour = captures.get(3).unwrap().as_str().parse().unwrap();
+    let end_minute = captures.get(4).unwrap().as_str().parse().unwrap();
+
+    let start = NaiveTime::from_hms_opt(start_hour, start_minute, 0).ok_or(
+        Report::new(ParsePeriodError).attach_printable(format!(
+            "Failed to parse time: {}{}",
+            start_hour, start_minute
+        )),
+    )?;
+    let end = NaiveTime::from_hms_opt(end_hour, end_minute, 0).ok_or(
+        Report::new(ParsePeriodError)
+            .attach_printable(format!("Failed to parse time: {}{}", end_hour, end_minute)),
+    )?;
+    Ok(Period { start, end })
 }
 
 impl fmt::Display for ParseWeeksError {
