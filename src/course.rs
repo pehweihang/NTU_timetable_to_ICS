@@ -20,7 +20,7 @@ pub struct Course {
 
 #[derive(Debug)]
 pub struct Class {
-    pub weekday: u32,
+    pub weekday: chrono::Weekday,
     pub period: Period,
     pub venue: String,
     pub group: String,
@@ -31,7 +31,7 @@ pub struct Class {
 #[derive(Debug)]
 pub struct Exam {
     pub day: u32,
-    pub month: String,
+    pub month: chrono::Month,
     pub year: u32,
     pub peroid: Period,
 }
@@ -104,9 +104,16 @@ impl Course {
             if row[9].is_empty() {
                 continue;
             }
+            let weekday = match row[11].parse::<chrono::Weekday>() {
+                Ok(wd) => wd,
+                Err(_) => {
+                    return Err(Report::new(ParseTableError::Other)
+                        .attach_printable(format!("Failed to parse weekday: {}", row[11])))
+                }
+            };
 
             let class = Class {
-                weekday: parse_weekday(row[11]).change_context(ParseTableError::Other)?,
+                weekday,
                 period: parse_period(row[12]).change_context(ParseTableError::Other)?,
                 venue: row[13].into(),
                 group: row[10].into(),
@@ -145,9 +152,18 @@ fn parse_exam(exam_raw: &str) -> Result<Exam, ParseExamError> {
         .ok_or(ParseExamError)
         .into_report()
         .attach_printable_lazy(|| "Failed to parse exam date")?;
+
+    let month = captures.name("month").unwrap().as_str();
+    let month = match month.parse() {
+        Ok(m) => m,
+        Err(_) => {
+            return Err(Report::new(ParseExamError)
+                .attach_printable(format!("Failed to parse month: {}", month)))
+        }
+    };
     Ok(Exam {
         day: captures.name("day").unwrap().as_str().parse().unwrap(),
-        month: captures.name("month").unwrap().as_str(),
+        month,
         year: captures.name("year").unwrap().as_str().parse().unwrap(),
         peroid: Period {
             start: Time {
@@ -284,31 +300,4 @@ fn parse_weeks(weeks_raw: &str) -> Result<Vec<u32>, ParseWeeksError> {
         }
     }
     Ok(weeks)
-}
-
-#[derive(Debug)]
-pub struct ParseWeekdayError;
-
-impl std::fmt::Display for ParseWeekdayError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("Unable to parse weekday")
-    }
-}
-
-impl Error for ParseWeekdayError {}
-
-fn parse_weekday(weekday: &str) -> Result<u32, ParseWeekdayError> {
-    match weekday {
-        "Sun" => Ok(0),
-        "Mon" => Ok(1),
-        "Tue" => Ok(2),
-        "Wed" => Ok(3),
-        "Thu" => Ok(4),
-        "Fri" => Ok(5),
-        "Sat" => Ok(6),
-        _ => Err(Report::new(ParseWeekdayError).attach_printable(format!(
-            "Unable to parse weekday {}, expected one of: Sun, Mon, Tue, Wed, Thu, Fri, Sat",
-            weekday
-        ))),
-    }
 }
