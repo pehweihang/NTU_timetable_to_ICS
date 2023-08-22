@@ -113,7 +113,6 @@ impl Course {
                 weeks: parse_weeks(row[14], recess_week).change_context(ParseTableError::Other)?,
                 class_type: row[9].into(),
             };
-            println!("{:#?}", class.weeks);
 
             if let Some(current_course) = courses.last_mut() {
                 current_course.classes.push(class);
