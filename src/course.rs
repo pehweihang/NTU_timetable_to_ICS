@@ -57,7 +57,7 @@ impl fmt::Display for ParseTableError {
 impl Error for ParseTableError {}
 
 impl Course {
-    pub fn parse_from_table(table: String) -> Result<Vec<Self>, ParseTableError> {
+    pub fn parse_from_table(table: String, recess_week: u32) -> Result<Vec<Self>, ParseTableError> {
         let mut courses = Vec::new();
         for (i, row) in enumerate(&table.replace('\n', "").split('\t').chunks(NUM_COLUMNS)) {
             let row = row.map(|item| item.trim()).collect_vec();
@@ -110,9 +110,10 @@ impl Course {
                 period: parse_period(row[12]).change_context(ParseTableError::Other)?,
                 venue: row[13].into(),
                 group: row[10].into(),
-                weeks: parse_weeks(row[14]).change_context(ParseTableError::Other)?,
+                weeks: parse_weeks(row[14], recess_week).change_context(ParseTableError::Other)?,
                 class_type: row[9].into(),
             };
+            println!("{:#?}", class.weeks);
 
             if let Some(current_course) = courses.last_mut() {
                 current_course.classes.push(class);
@@ -300,7 +301,7 @@ impl fmt::Display for ParseWeeksError {
 
 impl Error for ParseWeeksError {}
 
-fn parse_weeks(weeks_raw: &str) -> Result<Vec<u32>, ParseWeeksError> {
+fn parse_weeks(weeks_raw: &str, recess_week: u32) -> Result<Vec<u32>, ParseWeeksError> {
     let re = regex::Regex::new("Teaching Wk(.*)").unwrap();
     let weeks_raw = re
         .captures(weeks_raw)
@@ -322,5 +323,10 @@ fn parse_weeks(weeks_raw: &str) -> Result<Vec<u32>, ParseWeeksError> {
             weeks.push(x.parse::<u32>().unwrap());
         }
     }
-    Ok(weeks)
+
+    // account for recess_week
+    Ok(weeks
+        .into_iter()
+        .map(|w| if w < recess_week { w } else { w + 1 })
+        .collect_vec())
 }
