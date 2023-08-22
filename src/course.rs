@@ -31,7 +31,7 @@ pub struct Class {
 #[derive(Debug)]
 pub struct Exam {
     pub day: u32,
-    pub month: u32,
+    pub month: String,
     pub year: u32,
     pub peroid: Period,
 }
@@ -79,6 +79,28 @@ impl Course {
                     Report::new(ParseTableError::MissingValues(msg.clone())).attach_printable(msg)
                 );
             }
+
+            // Create new course if info exists
+            if let Ok(new_course) = Course::new(
+                row[0].into(),
+                row[1].into(),
+                row[2].into(),
+                row[3].into(),
+                row[6].into(),
+                row[7].into(),
+            ) {
+                courses.push(new_course);
+            }
+
+            // Has exam info
+            if !row[14].is_empty() {
+                if let Some(current_course) = courses.last_mut() {
+                    current_course.exam =
+                        Some(parse_exam(row[14]).change_context(ParseTableError::Other)?);
+                }
+            }
+
+            // No classes if there is no class_type
             if row[9].is_empty() {
                 continue;
             }
@@ -92,16 +114,6 @@ impl Course {
                 class_type: row[9].into(),
             };
 
-            if let Ok(new_course) = Course::new(
-                row[0].into(),
-                row[1].into(),
-                row[2].into(),
-                row[3].into(),
-                row[6].into(),
-                row[7].into(),
-            ) {
-                courses.push(new_course);
-            }
             if let Some(current_course) = courses.last_mut() {
                 current_course.classes.push(class);
             } else {
@@ -113,6 +125,56 @@ impl Course {
         }
         Ok(courses)
     }
+}
+
+#[derive(Debug)]
+pub struct ParseExamError;
+
+impl fmt::Display for ParseExamError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Failed to parse exam")
+    }
+}
+
+impl Error for ParseExamError {}
+
+fn parse_exam(exam_raw: &str) -> Result<Exam, ParseExamError> {
+    let re = regex::Regex::new(r"/(?<day>\d{2})-(?<month>[A-Z][a-z]{2})-(?<year>[0-9]{4}) (?<start_hour>\d{2})(?<start_minute>\d{2})to(?<end_hour>\d{2})(?<end_minute>\d{2})/gm").unwrap();
+    let captures = re
+        .captures(exam_raw)
+        .ok_or(ParseExamError)
+        .into_report()
+        .attach_printable_lazy(|| "Failed to parse exam date")?;
+    Ok(Exam {
+        day: captures.name("day").unwrap().as_str().parse().unwrap(),
+        month: captures.name("month").unwrap().as_str(),
+        year: captures.name("year").unwrap().as_str().parse().unwrap(),
+        peroid: Period {
+            start: Time {
+                hour: captures
+                    .name("start_hour")
+                    .unwrap()
+                    .as_str()
+                    .parse()
+                    .unwrap(),
+                minute: captures
+                    .name("start_minute")
+                    .unwrap()
+                    .as_str()
+                    .parse()
+                    .unwrap(),
+            },
+            end: Time {
+                hour: captures.name("end_hour").unwrap().as_str().parse().unwrap(),
+                minute: captures
+                    .name("end_minute")
+                    .unwrap()
+                    .as_str()
+                    .parse()
+                    .unwrap(),
+            },
+        },
+    })
 }
 
 #[derive(Debug)]
@@ -207,7 +269,8 @@ fn parse_weeks(weeks_raw: &str) -> Result<Vec<u32>, ParseWeeksError> {
         .into_report()
         .attach_printable_lazy(|| "Invalid weeks format".to_string())?
         .get(1)
-        .unwrap().as_str();
+        .unwrap()
+        .as_str();
     let mut weeks = Vec::new();
     let re = regex::Regex::new("^(?<start>[0-9]+)-(?<end>[0-9]+)$").unwrap();
     for x in weeks_raw.split(',') {
